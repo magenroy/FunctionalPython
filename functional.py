@@ -1,3 +1,29 @@
+def to_args(f):
+    """
+    function -> function
+
+    Converts a function that takes one collection of arguments to a function
+    that takes multiple arguments.
+
+    >>> to_args(sum)(1,2,3,4)
+    10
+    """
+    return lambda *args: f(args)
+
+def to_arglist(f):
+    """
+    function -> function
+
+    Converts a function that takes multiple arguments to a function that takes
+    one collection of arguments.
+    >>> to_arglist(lambda a, b, c, d: a + b + c + d)([1, 2, 3 ,4])
+    10
+    """
+    return lambda args: f(*args)
+
+def flip(f):
+    return lambda x, y: f(y, x)
+
 def curry(f, n=1):
     """
     (function, int) -> function
@@ -9,17 +35,17 @@ def curry(f, n=1):
     arbitrarily.
 
     >>> add4 = lambda a, b, c, d: a + b + c + d
-    >>> add4(1,2,3,4)
+    >>> add4(1, 2, 3, 4)
     10
-    >>> curry(add4)(1,2)(3,4)
+    >>> curry(add4)(1, 2)(3,4)
     10
-    >>> curry(add4, 2)(1)(2,3)(4)
+    >>> curry(add4, 2)(1)(2, 3)(4)
     10
-    >>> curry(curry(add4, 3), -1)(1)(2)(3,4) # this is like curry(add4, 2)
+    >>> curry(curry(add4, 3), -1)(1)(2)(3, 4) # this is like curry(add4, 2)
     10
     """
     if n != int(n): # the type does not need to be an integer, the value does
-        raise ValueError("n must be an integer")
+        raise ValueError("n must be an integer.")
     if n > 0:
         return lambda *x: curry(lambda *args: f(*(x + args)), n - 1)
     elif n < 0:
@@ -40,8 +66,6 @@ def foldr(f, acc, xs):
     >>> foldr(lambda x, y: x ** y, 2, [2, 2, 2])
     65536
     """
-    # it would be better to have functions for taking the head and tail instead
-    # of using indices
     return f(xs[0], foldr(f, acc, xs[1:])) if xs else acc
 
 def foldl(f, acc, xs):
@@ -89,6 +113,57 @@ def foldl1(f, xs):
     """
     return foldl(f, xs[0], xs[1:])
 
+def scanr(f, acc, xs):
+    """
+    ((a, b) -> b, b, collection of a) -> list of b
+
+    foldr and collect intermediate results.
+
+    >>> scanr(to_args(sum), 0, [1, 2, 3, 4, 5])
+    [15, 14, 12, 9, 5, 0]
+    """
+    if xs:
+        ys = scanr(f, acc, xs[1:])
+        return [f(xs[0], ys[0])] + ys
+    else:
+        return [acc]
+
+def scanl(f, acc, xs):
+    """
+    ((b, a) -> b, b, collection of a) -> list of b
+
+    foldl and collect intermediate results.
+
+    >>> scanl(to_args(sum), 0, [1, 2, 3, 4, 5])
+    [0, 1, 3, 6, 10, 15]
+    """
+    return [acc] + (scanl(f, f(acc, xs[0]), xs[1:]) if xs else [])
+
+def scanr1(f, xs):
+    """
+    ((a, b) -> b, collection of a) -> list of b
+
+    foldr1 and collect intermediate results.
+
+    >>> scanr1(to_args(sum), [1, 2, 3, 4, 5])
+    [15, 14, 12, 9, 5]
+    """
+    # depending on the data struct, it might be more efficient to reimplement
+    # the algorithm and just check for a singleton instead of empty
+    # (eg Haskell lists)
+    return scanr(f, xs[-1], xs[:-1])
+
+def scanl1(f, xs):
+    """
+    ((b, a) -> b, collection of a) -> list of b
+
+    foldl1 and collect intermediate results.
+
+    >>> scanl1(to_args(sum), [1, 2, 3, 4, 5])
+    [1, 3, 6, 10, 15]
+    """
+    return scanl(f, xs[0], xs[1:])
+
 def comp(*fs):
     """
     (function, function) -> function
@@ -107,28 +182,17 @@ def comp(*fs):
     """
     return foldr(lambda f, g: lambda x: f(g(x)), lambda x: x, fs)
 
-def to_args(f):
+def zip_with(f, *xs):
     """
-    function -> function
+    (function, iterables) -> map
 
-    Converts a function that takes one collection of arguments to a function
-    that takes multiple arguments.
+    Zips the iterables and then uses the elements of each resulting collection
+    as the arguments for the function.
 
-    >>> to_args(sum)(1,2,3,4)
-    10
+    >>> list(zip_with(to_args(sum), (1, 2), (3, 4)))
+    [4, 6]
     """
-    return lambda *args: f(args)
-
-def to_arglist(f):
-    """
-    function -> function
-
-    Converts a function that takes multiple arguments to a function that takes
-    one collection of arguments.
-    >>> to_arglist(lambda a, b, c, d: a + b + c + d)([1, 2, 3 ,4])
-    10
-    """
-    return lambda args: f(*args)
+    return map(to_arglist(f), zip(*xs))
 
 if __name__ == "__main__":
     import doctest
