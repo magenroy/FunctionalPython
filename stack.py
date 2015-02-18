@@ -1,161 +1,125 @@
+from functional import foldr, foldl, flip, act_foldr
+
+# implement freeze, thaw (aren't these just constructors for IStack and MStack?)
+# should inherit from Sequence and MutableSequence
+# testing and docstrings needed
+
 class Stack():
     """
-    Haskell style list. Immutable. Works best with recursion, so probably not
-    very useful in Python.
-    Differences: heterogeneous, strict.
+    Abstract functional stack class.
     """
     # Cannot iterate over stacks longer than 993 elements.
 
-    def __init__(self, data=()):
+    def __init__(self):
         """
-        Initializes the stack in the reverse order of data.
-        (This kind of makes sense since the statement "s = Stack([1,2,3])"
-        sounds like "stack the elements 1 2 3" (see __reversed__))
+        Empty initializer for Stacks
         """
+        
         self._data = ()
-        for datum in data:
-            self._data = (datum, self.copy())
 
     def __str__(self):
         if self:
-            return "({}:{})".format(self.head(), self.tail())
+            return "({}:{})".format(self.head, self.tail)
         else:
             return "[]"
 
     def __reversed__(self):
-        return Stack(self)
-        # this is nice. I like this. (But maybe its bad, it seems that
-        # name_of_class(instance_of_class) should == instance_of_class
+        return foldl(Stack.cons, Stack(), self)
 
     def __repr__(self):
-        return "Stack({!r})".format(list(reversed(self)))
+        return "Stack({!r})".format(list(self))
 
-    def __eq__(self, value):
-        # this implemented in Haskell style, a more practical implementation
-        # would be self._data == value._data
-        # this hierarchy is kind of yucky
-        if isinstance(value, Stack):
-            if self and value:
-                return self.head() == value.head() and self.tail() == value.tail()
-            else:
-                return not (self or value)
-        else:
-            return False
+    def __eq__(self, other):
+        return type(self) is type(other) and self.raw == other.raw
 
     def __getitem__(self, index):
-        if index == 0:
-            return self.head()
+        if isinstance(index, slice):
+            # how can I avoid getting the length of self?
+            # getting len means I first have to traverse self.
+            # note that this does not make things as effecient as they should be
+            # (folds)
+            return foldr(lambda i, s: s.cons(self[i]), Stack(),
+                         range(*index.indices(len(self))))
         else:
-            return self.tail()[index - 1]
+            if 0 <= index == int(index):
+                go = lambda s, i: go(s.tail, i - 1) if i else s.head
+                return go(self, index)
+            else:
+                raise ValueError("index must be a natural number.")
 
     def __len__(self):
-        if self.raw():
-            return 1 + len(self.tail())
-        else:
-            return 0
+        return 1 + len(self.tail) if self.raw else 0
 
     def __iter__(self):
         if self:
-            yield(self.head())
-            s = iter(self.tail())
+            yield(self.head)
+            s = iter(self.tail)
             for datum in s: # recursion alert!
                 yield(datum)
         else:
             raise StopIteration
     
     def __contains__(self, value):
-        return self and (self.head() == value or value in self.tail())
+        return self and (self.head == value or value in self.tail)
 
     def __add__(self, other):
-        if self and other:
-            t1, t2 = reversed(self), other
-            for e in t1:
-                t2 = t2.cons(e)
-            return t2
-        elif self:
-            return self
-        elif other:
-            return other
+        return foldr(flip(Stack.cons), other, self)
+#        if self and other:
+#            # miss out on a nicer solution because adding the to last element
+#            # would be really slow because of strictness
+#            t1, t2 = reversed(self), other
+#            for e in t1:
+#                t2 = t2.cons(e)
+#            return t2
+#        elif self:
+#            return self
+#        elif other:
+#            return other
 
     def concat(self):
-        return self.foldr(lambda x, y: x + y, Stack())
-
-    def concatMap(self, f):
-        return reversed(Stack(map(f, self))).concat()
-
-    ### Monad instance
-    def bind(self, mf):
-        return self.concatMap(mf)
+        return foldr(lambda x, y: x + y, Stack(), self)
 
     def copy(self):
-        s = Stack()
-        s._data = self.raw()
-        return s
+        return stackify(self.raw)
 
+    @property
     def raw(self):
-        return self._data
+        return self._data[:]
 
     def cons(self, datum):
         return stackify((datum, self))
 
+    @property
     def head(self):
         return self._data[0]
 
+    @property
     def tail(self):
         return self._data[1]
 
     def take(self, n):
-        if n == 0:
-            return Stack()
+        if 0 <= n == int(n):
+            go = lambda s, i: go(s.tail, i - 1).cons(s.head) if i else Stack()
+            return go(self, n)
         else:
-            return self.tail().take(n - 1).cons(self.head())
+            raise ValueError("n must be a natural number.")
 
+    # it seems like this should replace tail and just have n=1 default, but then
+    # I can't make it a property
     def drop(self, n):
-        if n == 0:
-            return self
+        if 0 <= n == int(n):
+            go = lambda s, i: go(s.tail, i - 1) if i else s
+            return go(self, n)
         else:
-            return self.tail().drop(n - 1)
+            raise ValueError("n must be a natural number.")
 
+    @property
     def init(self):
         return self.take(len(self) - 1)
 
+    @property
     def last(self):
-        if not self:
-            return ()
-        elif self._data[1] == ():
-            return self.head()
-        else:
-            return self.tail().last()
-
-    def foldl(self, f, init):
-        if self:
-            return self.tail().foldl(f, f(init, self.head()))
-        else:
-            return init
-
-    def foldr(self, f, init):
-        if self:
-            return f(self.head(), self.tail().foldr(f, init))
-        else:
-            return init
-
-    def foldl1(self, f):
-        return self.tail().foldl(f, self.head())
-
-    def foldr1(self, f):
-        return self.tail().foldr(f, self.head())
-
-    def spanl(self, f, init):
-        pass
-
-    def spanr(self, f, init):
-        pass
-
-    def spanl1(self, f):
-        pass
-
-    def spanr1(self, f):
-        pass
+        return self[-1]
 
 
 def stackify(s):
@@ -165,3 +129,68 @@ def stackify(s):
     out = Stack()
     out._data = s
     return out
+
+class IStack(Stack):
+    """
+    Immutable stack.
+    """
+    # Cannot iterate over stacks longer than 993 elements.
+
+    def __init__(self, data=()):
+        """
+        Iniitalizes stack elements in same order as data.
+        """
+        Stack.__init__(self)
+        self._data = Stack.__add__(data, Stack()).raw
+
+    def __repr__(self):
+        return "IStack({!r})".format(list(self))
+
+class MStack(Stack):
+    """
+    Mutable stack.
+    """
+    # Cannot iterate over stacks longer than 993 elements.
+
+    def __init__(self, data=()):
+        """
+        Iniitalizes stack elements in same order as data.
+        """
+        Stack.__init__(self)
+        act_foldr(self.push, data)
+
+    def __repr__(self):
+        return "MStack({!r})".format(list(self))
+
+    def __setitem__(self, index, value):
+        if 0 <= index == int(index):
+            def go(s, i):
+                if i:
+                    go(s.tail, i - 1)
+                else:
+                    s._data[0] = value
+            go(self, index)
+        else:
+            raise ValueError("index must be a natural number.")
+
+    def __delitem__(self, index):
+        if 0 <= index == int(index):
+            def go(s, i):
+                if i:
+                    go(s.tail, i - 1)
+                else:
+                    s._data = s.tail.raw
+            go(self, index)
+        else:
+            raise ValueError("index must be a natural number.")
+
+    def concat(self):
+        self._data = foldr(lambda x, y: x + y, MStack(), self).raw
+
+    def push(self, datum):
+        self._data = [datum, self.copy()] # use list for mutability
+
+    def pop(self):
+        out = self._data[0]
+        self._data = self.tail.raw
+        return out
