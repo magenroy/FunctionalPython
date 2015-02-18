@@ -2,6 +2,7 @@ from collections.abc import Mapping
 
 # Can I make an natcheck or intcheck function so I can avoid rewriting it all
 # the time? (But I don't wan't to export it)
+# maybe I can implement folds using iter?
 
 def to_args(f):
     """
@@ -92,15 +93,6 @@ def apply(f, *args, **kwargs):
     """
     return f(*args, **kwargs)
 
-def ap(f, g):
-    """
-    ((2+ ary) function, function) -> unary function
-
-    Acts like <*> or ap for the function instance of Applicative and Monad in
-    Haskell. This means that ap(f, g)(x) evaluates to f(x, g(x)).
-    """
-    return lambda x: f(x, g(x))
-
 def curry(f, n=1):
     """
     (function, natural number) -> function
@@ -117,7 +109,7 @@ def curry(f, n=1):
     >>> add4 = lambda a, b, c, d: a + b + c + d
     >>> add4(1, 2, 3, 4)
     10
-    >>> curry(add4)(1, 2)(3,4)
+    >>> curry(add4)(1, 2)(3, 4)
     10
     >>> curry(add4, 2)(1)(2, 3)(4)
     10
@@ -314,6 +306,64 @@ def zip_with(f, *xs):
     [4, 6]
     """
     return map(to_argcollection(f), zip(*xs))
+
+def join_iters(*iters):
+    """
+    iterations -> iteration
+
+    Joins iterations one after another.
+
+    >>> a, b = enumerate([1, 2]), enumerate([3,4])
+    >>> for i in join_iters(a, b): print(i)
+    (0, 1)
+    (1, 2)
+    (0, 3)
+    (1, 4)
+    """
+    for it in iters:
+        for e in it:
+            yield(e)
+    # this should raise StopIteration automatically
+
+#testing
+# this should be better since it doesn't use indexing, and more importantly, it
+# doesn't use slices
+def ifoldr(f, acc, xs):
+    def go(it):
+        try:
+            return f(next(it), go(it))
+        except StopIteration:
+            return acc
+    return go(iter(xs))
+
+def ifoldl(f, acc, xs):
+    def go(ac, it):
+        try:
+            return go(f(ac, next(it)), it)
+        except StopIteration:
+            return ac
+    return go(acc, iter(xs))
+
+# this version should return an iterator (laziness, yay!)
+def iscanr(f, acc, xs):
+    def go(it):
+        try:
+            x = next(it)
+            its = go(it)
+            y = next(its)
+            return join_iters(iter([f(x, y)]), iter([y]), its)
+        except StopIteration:
+            return iter([acc])
+    return go(iter(xs))
+
+def iscanl(f, acc, xs):
+    def go(ac, it):
+        try:
+            # this relies on 'next(it)' appearing before 'it'
+            return join_iters(iter([ac]), go(f(ac, next(it)), it))
+        except StopIteration:
+            return iter([ac])
+    return go(acc, iter(xs))
 
 if __name__ == "__main__":
     import doctest
