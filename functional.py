@@ -1,3 +1,8 @@
+from collections.abc import Mapping
+
+# Can I make an natcheck or intcheck function so I can avoid rewriting it all
+# the time? (But I don't wan't to export it)
+
 def to_args(f):
     """
     function -> function
@@ -7,32 +12,107 @@ def to_args(f):
 
     >>> to_args(sum)(1,2,3,4)
     10
+    >>> to_args(lambda d: d["a"])(a=1)
+    1
     """
-    return lambda *args: f(args)
+    return lambda *args, **kwargs: f(*filter(bool, (args, kwargs)))
 
-def to_arglist(f):
+def to_argcollection(f):
     """
     function -> function
 
     Converts a function that takes multiple arguments to a function that takes
-    one collection of arguments.
-    >>> to_arglist(lambda a, b, c, d: a + b + c + d)([1, 2, 3 ,4])
+    one collection of arguments. The new function can take either a Mapping or
+    an Iterable.
+
+    >>> add4 = lambda a, b, c, d: a + b + c + d
+    >>> to_argcollection(add4)([1, 2, 3 ,4])
+    10
+    >>> to_argcollection(add4)({"a": 1, "b": 2, "c": 3, "d": 4})
     10
     """
-    return lambda args: f(*args)
+    return lambda args: f(**args) if isinstance(args, Mapping) else f(*args)
 
 def flip(f):
+    """
+    function -> function
+
+    Flips the order of the first two arguments of a function.
+
+    >>> list(flip(zip)([1,2],[3,4]))
+    [(3, 1), (4, 2)]
+    """
     return lambda x, y: f(y, x)
+
+def const(x, *y, **z):
+    """
+    (a, ...) -> a
+
+    Returns the first input and ignores the rest. This means that it also acts
+    as the identity function when given only one input.
+
+    >>> const(1, 2)
+    1
+    >>> const(1)
+    1
+    >>> const(1, 2, 3, 4, 5)
+    1
+    """
+    return x
+
+# Is there a better name for this?
+def stretch(f, n=1):
+    """
+    (function, natural number) -> function
+
+    Returns a function that equals f except that it requires n extra arguments
+    in the front.
+
+    >>> stretch(to_args(sum), 2)(10, 20, 1, 2, 3)
+    6
+    """
+    if 0 <= n == int(n):
+        return curry(curry(const)(stretch(f, n - 1)), -1) if n else f
+    else:
+        raise ValueError("n must be a natural number.")
+
+def apply(f, *args, **kwargs):
+    """
+    (a -> b, a) -> b
+
+    Returns applies the function to the argument(s).
+
+    >>> apply(lambda x: x + 1, 5)
+    6
+    >>> functions = [lambda x: x + 1, lambda x: 2 * x, lambda x: x ** 2]
+    >>> list(map(curry(flip(apply))(3), functions))
+    [4, 6, 9]
+    >>> list(zip_with(apply, functions, [5, 4, 3]))
+    [6, 8, 9]
+    """
+    return f(*args, **kwargs)
+
+def ap(f, g):
+    """
+    ((2+ ary) function, function) -> unary function
+
+    Acts like <*> or ap for the function instance of Applicative and Monad in
+    Haskell. This means that ap(f, g)(x) evaluates to f(x, g(x)).
+    """
+    return lambda x: f(x, g(x))
 
 def curry(f, n=1):
     """
-    (function, int) -> function
+    (function, natural number) -> function
 
     Generalized currying and uncurrying.
 
     If f is composed of k partial functions, then curry(f,n) is composed of k +
     n partial functions, with arguments distributed among the functions
     arbitrarily.
+
+    Note that only once-uncurried functions can take a keyword argument for the
+    first paramater, and the name of that argument is 'x'.
 
     >>> add4 = lambda a, b, c, d: a + b + c + d
     >>> add4(1, 2, 3, 4)
@@ -43,13 +123,26 @@ def curry(f, n=1):
     10
     >>> curry(curry(add4, 3), -1)(1)(2)(3, 4) # this is like curry(add4, 2)
     10
+    >>> curry(curry(const)(add4), -1)(10, 1, 1, 1, 1) # this is stretch(add4)
+    4
+    >>> curry(add4)(d=4, c=3)(1, 2)
+    10
+    >>> curry(curry(add4, 3), -1)(x=1)(d=2)(3, c=4)
+    10
     """
     if n != int(n): # the type does not need to be an integer, the value does
         raise ValueError("n must be an integer.")
     if n > 0:
-        return lambda *x: curry(lambda *args: f(*(x + args)), n - 1)
+        return lambda *x, **y: curry(lambda *args, **kwargs: f(*(x + args),
+                                                               **dict(y,
+                                                               **kwargs)),
+                                     n - 1)
     elif n < 0:
-        return lambda x, *args: curry(f(x), n + 1)(*args)
+        # Do I really want the kwargs for this?
+        # (If not, remember to change docstring)
+        # That the only name it can take is 'x' makes it very yucky.
+        # (There's no way to extract the original name, is there?)
+        return lambda x, *args, **kwargs: curry(f(x), n + 1)(*args, **kwargs)
     else:
         return f
 
@@ -59,9 +152,10 @@ def foldr(f, acc, xs):
 
     Right-associative fold.
 
-    Applies the binary operator on the elements of the collection with the
-    innermost operation at the end, and the outermost operation at the
-    beginning.
+    Applies the binary operator (f) on the elements of the collection (xs)
+    right-associatively, that is, with the innermost operation at the end, and
+    the outermost operation at the beginning. The innermost operation uses the
+    accumulator (acc).
 
     >>> foldr(lambda x, y: x ** y, 2, [2, 2, 2])
     65536
@@ -74,9 +168,10 @@ def foldl(f, acc, xs):
 
     Left-associative fold.
 
-    Applies the binary operator on the elements of the collection with the
-    innermost operation at the beginning, and the outermost operation at the
-    end.
+    Applies the binary operator (f) on the elements of the collection (xs)
+    left-associatively, that is, with the innermost operation at the beginning,
+    and the outermost operation at the end. The innermost operation uses the
+    accumulator (acc).
 
     >>> foldl(lambda x, y: x ** y, 2, [2, 2, 2])
     256
@@ -89,9 +184,9 @@ def foldr1(f, xs):
 
     Right-associative fold on non-empty collections.
 
-    Applies the binary operator on the elements of the collection with the
-    innermost operation at the end, and the outermost operation at the
-    beginning.
+    Applies the binary operator (f) on the elements of the collection (xs)
+    right-associatively, that is, with the innermost operation at the end, and
+    the outermost operation at the beginning.
 
     >>> foldr1(lambda x, y: x ** y, [2, 2, 2, 2])
     65536
@@ -104,9 +199,9 @@ def foldl1(f, xs):
 
     Left-associative fold on non-empty collections.
 
-    Applies the binary operator on the elements of the collection with the
-    innermost operation at the beginning, and the outermost operation at the
-    end.
+    Applies the binary operator (f) on the elements of the collection (xs)
+    left-associatively, that is, with the innermost operation at the beginning,
+    and the outermost operation at the end.
 
     >>> foldl1(lambda x, y: x ** y, [2, 2, 2, 2])
     256
@@ -164,14 +259,40 @@ def scanl1(f, xs):
     """
     return scanl(f, xs[0], xs[1:])
 
+def act_foldr(f, xs):
+    """
+    (a -> NoneType, collection of a) -> NoneType
+
+    Sequence actions over xs right-associatively.
+
+    >>> l = [5, 4, 3]
+    >>> act_foldr(l.append, [1, 2])
+    >>> l
+    [5, 4, 3, 2, 1]
+    """
+    foldr(flip(stretch(f)), None, xs)
+
+def act_foldl(f, xs):
+    """
+    (a -> NoneTypem, collection of a) -> NoneType
+
+    Sequence actions over xs left-associatively.
+
+    >>> l = [1, 2, 3]
+    >>> act_foldl(l.append, [4, 5])
+    >>> l
+    [1, 2, 3, 4, 5]
+    """
+    foldl(stretch(f), None, xs)
+
 def comp(*fs):
     """
-    (function, function) -> function
+    (unary functions) -> unary function
 
-    Somewhat generalized function composition.
+    Polyvariadic function composition.
 
-    The new function takes as many arguments as the last function given. It
-    passes the results from right to left.
+    The output function passes the intermediate results of the input functions
+    from right to left.
 
     >>> succ = lambda x: x + 1
     >>> pred = lambda x: x - 1
@@ -180,7 +301,7 @@ def comp(*fs):
     >>> comp(succ,succ,comp(pred,succ,pred))(1)
     2
     """
-    return foldr(lambda f, g: lambda x: f(g(x)), lambda x: x, fs)
+    return foldr(lambda f, g: lambda x: f(g(x)), const, fs)
 
 def zip_with(f, *xs):
     """
@@ -192,7 +313,7 @@ def zip_with(f, *xs):
     >>> list(zip_with(to_args(sum), (1, 2), (3, 4)))
     [4, 6]
     """
-    return map(to_arglist(f), zip(*xs))
+    return map(to_argcollection(f), zip(*xs))
 
 if __name__ == "__main__":
     import doctest
