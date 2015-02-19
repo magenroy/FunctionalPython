@@ -2,7 +2,20 @@ from collections.abc import Mapping
 
 # Can I make an natcheck or intcheck function so I can avoid rewriting it all
 # the time? (But I don't wan't to export it)
+# 
 # maybe I can implement folds using iter?
+#
+# how fast is it to do iter on an iterator (this affects whether or not I should
+# include a version of folds that take an iterator at the top) (I think its
+# O(1))
+# this relies on the __iter__ of the iterable being the identity
+# should just use try-except to check if input is already an iterator
+#
+# consider moving folds and scans to another file
+#
+# maybe the scans can be implemented more cleanly:
+#   maybe I can intersperse yield statements among the computations for the
+#   corresponding folds
 
 def to_args(f):
     """
@@ -62,6 +75,7 @@ def const(x, *y, **z):
     return x
 
 # Is there a better name for this?
+# consider deleting this.
 def stretch(f, n=1):
     """
     (function, natural number) -> function
@@ -138,6 +152,20 @@ def curry(f, n=1):
     else:
         return f
 
+def join_iters(*iters):
+    """
+    iterations -> iteration
+
+    Joins iterations one after another.
+
+    >>> a, b = enumerate([1, 2]), enumerate([3,4])
+    >>> for i in join_iters(a, b): print(i, end=" ")
+    (0, 1) (1, 2) (0, 3) (1, 4) 
+    """
+    for it in iters:
+        for e in it:
+            yield(e)
+
 def foldr(f, acc, xs):
     """
     ((a, b) -> b, b, collection of a) -> b
@@ -152,7 +180,12 @@ def foldr(f, acc, xs):
     >>> foldr(lambda x, y: x ** y, 2, [2, 2, 2])
     65536
     """
-    return f(xs[0], foldr(f, acc, xs[1:])) if xs else acc
+    def go(it):
+        try:
+            return f(next(it), go(it))
+        except StopIteration:
+            return acc
+    return go(iter(xs))
 
 def foldl(f, acc, xs):
     """
@@ -168,7 +201,12 @@ def foldl(f, acc, xs):
     >>> foldl(lambda x, y: x ** y, 2, [2, 2, 2])
     256
     """
-    return foldl(f, f(acc, xs[0]), xs[1:]) if xs else acc
+    def go(ac, it):
+        try:
+            return go(f(ac, next(it)), it)
+        except StopIteration:
+            return ac
+    return go(acc, iter(xs))
 
 def foldr1(f, xs):
     """
@@ -183,7 +221,14 @@ def foldr1(f, xs):
     >>> foldr1(lambda x, y: x ** y, [2, 2, 2, 2])
     65536
     """
-    return foldr(f, xs[0], xs[1:])
+    # 'x' needs to come before 'it' because I need to call next before passing 'it'.
+    def go(x, it):
+        try:
+            return f(x, go(next(it), it))
+        except StopIteration:
+            return x
+    ixs = iter(xs)
+    return go(next(ixs), ixs)
 
 def foldl1(f, xs):
     """
@@ -198,58 +243,78 @@ def foldl1(f, xs):
     >>> foldl1(lambda x, y: x ** y, [2, 2, 2, 2])
     256
     """
-    return foldl(f, xs[0], xs[1:])
+    ixs = iter(xs)
+    return foldl(f, next(ixs), ixs)
+    # this relies on the __iter__ of the iterable being the identity
 
+# this version should return an iterator (laziness, yay!)
 def scanr(f, acc, xs):
     """
-    ((a, b) -> b, b, collection of a) -> list of b
+    ((a, b) -> b, b, collection of a) -> iteration of b
 
     foldr and collect intermediate results.
 
-    >>> scanr(to_args(sum), 0, [1, 2, 3, 4, 5])
+    >>> list(scanr(to_args(sum), 0, [1, 2, 3, 4, 5]))
     [15, 14, 12, 9, 5, 0]
     """
-    if xs:
-        ys = scanr(f, acc, xs[1:])
-        return [f(xs[0], ys[0])] + ys
-    else:
-        return [acc]
+    def go(it):
+        try:
+            x = next(it)
+            its = go(it)
+            y = next(its)
+            return join_iters(iter([f(x, y)]), iter([y]), its)
+        except StopIteration:
+            return iter([acc])
+    return go(iter(xs))
 
+# I can almost write fibs = 0:scanl (+) 1 fibs!
 def scanl(f, acc, xs):
     """
-    ((b, a) -> b, b, collection of a) -> list of b
+    ((b, a) -> b, b, collection of a) -> iteration of b
 
     foldl and collect intermediate results.
 
-    >>> scanl(to_args(sum), 0, [1, 2, 3, 4, 5])
+    >>> list(scanl(to_args(sum), 0, [1, 2, 3, 4, 5]))
     [0, 1, 3, 6, 10, 15]
     """
-    return [acc] + (scanl(f, f(acc, xs[0]), xs[1:]) if xs else [])
+    def go(ac, it):
+        try:
+            # this relies on 'next(it)' appearing before 'it'
+            return join_iters(iter([ac]), go(f(ac, next(it)), it))
+        except StopIteration:
+            return iter([ac])
+    return go(acc, iter(xs))
 
 def scanr1(f, xs):
     """
-    ((a, b) -> b, collection of a) -> list of b
+    ((a, b) -> b, collection of a) -> iteration of b
 
     foldr1 and collect intermediate results.
 
-    >>> scanr1(to_args(sum), [1, 2, 3, 4, 5])
+    >>> list(scanr1(to_args(sum), [1, 2, 3, 4, 5]))
     [15, 14, 12, 9, 5]
     """
-    # depending on the data struct, it might be more efficient to reimplement
-    # the algorithm and just check for a singleton instead of empty
-    # (eg Haskell lists)
-    return scanr(f, xs[-1], xs[:-1])
+    def go(x, it):
+        try:
+            its = go(next(it), it)
+            y = next(its)
+            return join_iters(iter([f(x, y)]), iter([y]), its)
+        except StopIteration:
+            return iter([x])
+    ixs = iter(xs) 
+    return go(next(ixs), ixs)
 
 def scanl1(f, xs):
     """
-    ((b, a) -> b, collection of a) -> list of b
+    ((b, a) -> b, collection of a) -> iteration of b
 
     foldl1 and collect intermediate results.
 
-    >>> scanl1(to_args(sum), [1, 2, 3, 4, 5])
+    >>> list(scanl1(to_args(sum), [1, 2, 3, 4, 5]))
     [1, 3, 6, 10, 15]
     """
-    return scanl(f, xs[0], xs[1:])
+    ixs = iter(xs)
+    return scanl(f, next(ixs), ixs)
 
 def act_foldr(f, xs):
     """
@@ -306,64 +371,6 @@ def zip_with(f, *xs):
     [4, 6]
     """
     return map(to_argcollection(f), zip(*xs))
-
-def join_iters(*iters):
-    """
-    iterations -> iteration
-
-    Joins iterations one after another.
-
-    >>> a, b = enumerate([1, 2]), enumerate([3,4])
-    >>> for i in join_iters(a, b): print(i)
-    (0, 1)
-    (1, 2)
-    (0, 3)
-    (1, 4)
-    """
-    for it in iters:
-        for e in it:
-            yield(e)
-    # this should raise StopIteration automatically
-
-#testing
-# this should be better since it doesn't use indexing, and more importantly, it
-# doesn't use slices
-def ifoldr(f, acc, xs):
-    def go(it):
-        try:
-            return f(next(it), go(it))
-        except StopIteration:
-            return acc
-    return go(iter(xs))
-
-def ifoldl(f, acc, xs):
-    def go(ac, it):
-        try:
-            return go(f(ac, next(it)), it)
-        except StopIteration:
-            return ac
-    return go(acc, iter(xs))
-
-# this version should return an iterator (laziness, yay!)
-def iscanr(f, acc, xs):
-    def go(it):
-        try:
-            x = next(it)
-            its = go(it)
-            y = next(its)
-            return join_iters(iter([f(x, y)]), iter([y]), its)
-        except StopIteration:
-            return iter([acc])
-    return go(iter(xs))
-
-def iscanl(f, acc, xs):
-    def go(ac, it):
-        try:
-            # this relies on 'next(it)' appearing before 'it'
-            return join_iters(iter([ac]), go(f(ac, next(it)), it))
-        except StopIteration:
-            return iter([ac])
-    return go(acc, iter(xs))
 
 if __name__ == "__main__":
     import doctest

@@ -1,33 +1,33 @@
 from functional import foldr, foldl, flip, act_foldr
+from collections import Sequence, MutableSequence
 
-# Fix the problem with instances not being from correct classes
-#   I think I have done this by using type(self) to get the constructor in the
-#   right places
-# implement freeze, thaw (aren't these just constructors for IStack and MStack?)
 # should inherit from Sequence and MutableSequence
 # testing and docstrings needed
 # should there be a data argument in the abstract Stack initializer?
 # should I even make a __repr__ for abstract Stack?
 # its hard to use Stack instances in docstrings for Stack
-# maybe should
 
-class Stack():
+# don't forget to implement the appropriate methods for Sequence
+class Stack(Sequence):
     """
     Abstract functional stack class.
     """
     # Cannot iterate over stacks longer than 993 elements.
 
-    def __init__(self):
+    def __init__(self, data=()):
         """
         Stack -> NoneType
 
-        Empty initializer for Stacks.
+        Iniitalizes stack elements in same order as data.
 
+        >>> Stack(range(4))
+        Stack([0, 1, 2, 3])
         >>> Stack()
         Stack([])
         """
         
         self._data = ()
+        self._data = Stack.__add__(data, type(self)()).raw if data else self._data
 
     def __str__(self):
         """
@@ -36,8 +36,8 @@ class Stack():
         Human readable string representation of a Stack based on Haskell
         implementation of lists.
 
-        >>> str(stackify((1,stackify((1, Stack())))))
-        '(1:(1:[]))'
+        >>> str(Stack([1,2]))
+        '(1:(2:[]))'
         """
         return "({}:{})".format(self.head, self.tail) if self else "[]"
 
@@ -49,15 +49,23 @@ class Stack():
         >>> reversed(stackify((1,stackify((2, Stack())))))
         Stack([2, 1])
         """
-        return foldl(Stack.cons, Stack(), self)
+        return foldl(Stack.cons, type(self)(), self)
 
     def __repr__(self):
         """
         Stack -> str
 
-        Not valid for abstract Stacks.
+        Evaluatable string representation of IStack.
+
+        >>> s = Stack([1, 2, 3])
+        >>> s == eval(repr(s))
+        True
+        >>> repr(s)
+        'Stack([1, 2, 3])'
+        >>>
         """
-        return "Stack({!r})".format(list(self))
+        # glory to abstractions!
+        return "{}({!r})".format(type(self).__name__, list(self))
 
     def __eq__(self, other):
         """
@@ -67,31 +75,60 @@ class Stack():
 
         >>> Stack() == Stack()
         True
+        >>> Stack([1, 2, 3]) == Stack((1, 2, 3))
+        True
         """
         return type(self) is type(other) and self.raw == other.raw
 
+    # UNFINISHED!!!
     def __getitem__(self, index):
         """
         (Stack, natural number or slice) -> Stack
 
         Stack.__getitem__(s, i) <==> s[i]
 
-        >>> s = IStack(range(10))
+        >>> s = Stack(range(10))
         >>> s[3]
         3
+        >>> s[-2] 
+        8
         >>> s[2:7:2]
-        IStack([2, 4, 6])
+        Stack([2, 4, 6])
+        >>> s[5:]
+        Stack([5, 6, 7, 8, 9])
+        >>> s[4::2]
+        Stack([4, 6, 8])
+        >>> s[:3]
+        Stack([0, 1, 2])
+        >>> s[:7:2]
+        Stack([0, 2, 4, 6])
+        >>> s[6::-2]
+        Stack([6, 4, 2, 0])
+        >>> s[6:3:-2]
+        Stack([6, 4])
         """
         if isinstance(index, slice):
-            # how can I avoid getting the length of self?
-            # getting len means I first have to traverse self.
-            # note that this implementation does is not as effecient as it
-            # should be even without getting len (eg folds)
-            # using enums and the iter based folds, I should be able to makes
-            # this run in linear time.
-            return foldr(lambda i, s: s.cons(self[i]), type(self)(),
-                         range(*index.indices(len(self))))
+            # can this be cleaner?
+            step = 1 if index.step is None else index.step
+            if index.start is None and index.stop is None:
+                # I could use filter and mod, but I don't know how filter will
+                # behave
+                return foldr(lambda ie, s: s.cons(ie[1]) if ie[0] % step == 0
+                        else s, type(self)(), enumerate(self))
+            else:
+                # I first chop off the ends so that I don't need to perform a
+                # check when I traverse them (infinitesimal optimization,
+                # consider removing for the sake of prettiness, on the other
+                # hand, the predicate in the other case will become uglier if I
+                # remove this...)
+                start = 0 if index.start is None else index.start
+                s = self.drop(start)
+                return (s if index.stop is None else
+                        s.take(index.stop))[::index.step]
+                #return self.drop(start).take(index.stop - start)[::index.step]
         else:
+            # actually, I should be correctly handling negative indices...
+            # use modulo
             if 0 <= index == int(index):
                 go = lambda s, i: go(s.tail, i - 1) if i else s.head
                 return go(self, index)
@@ -99,9 +136,28 @@ class Stack():
                 raise ValueError("index must be a natural number.")
 
     def __len__(self):
+        """
+        Stack -> int
+
+        Returns the number of elements in the Stack.
+
+        >>> len(Stack())
+        0
+        >>> len(Stack(range(100)))
+        100
+        """
         return 1 + len(self.tail) if self.raw else 0
 
     def __iter__(self):
+        """
+        Stack -> iteration
+
+        Returns an iteration of the Stack.
+
+        >>> s = Stack(range(3))
+        >>> for e in s: print(e, end=" ")
+        0 1 2 
+        """
         if self:
             yield(self.head)
             s = iter(self.tail)
@@ -111,13 +167,23 @@ class Stack():
             raise StopIteration
     
     def __contains__(self, value):
+        """
+        (Stack of a, a) -> bool
+
+        Checks for if the value is in the Stack.
+
+        >>> 1 in Stack()
+        False
+        >>> 2 in Stack([1, 2, 3])
+        True
+        """
         return self and (self.head == value or value in self.tail)
 
     def __add__(self, other):
         return foldr(flip(Stack.cons), other, self)
 
     def concat(self):
-        return foldr(lambda x, y: x + y, Stack(), self)
+        return foldr(lambda x, y: x + y, type(self)(), self)
 
     def copy(self):
         return stackify(self.raw)
@@ -139,7 +205,7 @@ class Stack():
 
     def take(self, n):
         if 0 <= n == int(n):
-            go = lambda s, i: go(s.tail, i - 1).cons(s.head) if i else Stack()
+            go = lambda s, i: go(s.tail, i - 1).cons(s.head) if i else type(self)()
             return go(self, n)
         else:
             raise ValueError("n must be a natural number.")
@@ -185,8 +251,7 @@ class IStack(Stack):
         >>> IStack(range(4))
         IStack([0, 1, 2, 3])
         """
-        Stack.__init__(self)
-        self._data = Stack.__add__(data, Stack()).raw
+        Stack.__init__(self, data)
 
     def __repr__(self):
         """
